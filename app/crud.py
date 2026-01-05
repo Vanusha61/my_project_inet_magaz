@@ -1,6 +1,6 @@
 from app.models import Order, OrderItem, Customer, Product
 from database import SessionLocal
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Any
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
 
@@ -115,21 +115,91 @@ def get_total_sales() -> Optional[float]:
     except Exception as err:
         print(err)
 
-def list_get_total_customers(customer_id: int) -> str:
+def list_get_total_customers(customer_id: int) -> List[dict[str, Any]]:
     try:
         with SessionLocal() as session:
-            total = 0
-            order_items = session.query(OrderItem).join(Order).filter(Order.customer_id == customer_id).all()
-            for item in order_items:
-                total += item.price * item.quantity
-            return f"Имя покупателя:"
+            res = []
+            rows = session.query(Product.name,
+                                        OrderItem.quantity,
+                                        OrderItem.price,
+                                        (OrderItem.price * OrderItem.quantity).label("total_price")
+                                        ).join(Order, OrderItem.order_id == Order.id).join(Product, OrderItem.product_id == Product.id).filter(Order.customer_id == customer_id).all()
+            for row in rows:
+                res.append({"name_product": row.name,
+                            "quantity": row.quantity,
+                            "price": row.price,
+                            "total_price": row.total_price})
+            return res
     except Exception as err:
         print(err)
+        raise
 
+def get_customer_purchases_grouped(customer_id: int) -> List[dict[str, Any]] | str:
+    try:
+        with (SessionLocal() as session):
+            result = session.query(
+                Product.name,
+                func.sum(OrderItem.quantity).label("quantity"),
+                func.sum(OrderItem.price * OrderItem.quantity).label("total_price"),
+            ).join(Order, OrderItem.order_id == Order.id
+                   ).join(Product, OrderItem.product_id == Product.id
+                          ).filter(Order.customer_id == customer_id
+                                   ).group_by(Product.id, Product.name
+                                              ).all()
+            if not result:
+                raise ValueError(f"Такого {customer_id} покуатель нет!")
+            return [
+                {"name_product": res.name,
+                 "quantity": res.quantity,
+                 "total_summ": res.total_price,}
+                for res in result
+            ]
+    except Exception as err:
+        print(err)
+        raise
+
+def get_top_products(limit: int) -> List[dict[str, Any]]:
+    try:
+        with (SessionLocal() as session):
+            result = session.query(Product.name,
+                                   func.sum(OrderItem.quantity).label("quantity"),
+                                   func.sum(OrderItem.price * OrderItem.quantity).label("total_price"),
+                                   ).join(Order, OrderItem.order_id == Order.id
+                                   ).join(Product, OrderItem.product_id == Product.id
+                                   ).group_by(Product.id, Product.name).order_by(func.sum(OrderItem.quantity * OrderItem.price).label("total_sales").desc()).limit(limit).all()
+            if not result:
+                raise ValueError("error")
+            return [
+                {"name_product": res.name,
+                 "quantity": res.quantity,
+                 "total_summ": res.total_price,}
+                 for res in result
+            ]
+    except Exception as err:
+        print(err)
+        raise
+
+def customer_report(customer_id: int) -> dict[str, Any]:
+    try:
+        with (SessionLocal() as session):
+            customer_res = session.query(Customer.name,
+                                        func.sum(OrderItem.quantity).label("quantity"),
+                                        func.sum(OrderItem.price * OrderItem.quantity).label("total_price"),
+                                        ).join(Order, Order.customer_id == Customer.id
+                                               ).join(OrderItem, OrderItem.order_id == Order.id
+                                               ).filter(Order.customer_id == customer_id).group_by(Customer.id, Customer.name).first()
+            if not customer_res:
+                raise ValueError("error")
+            return {'name': customer_res.name,
+                 "quantity": customer_res.quantity,
+                 "total_price": customer_res.total_price,}
+    except Exception as err:
+        print(err)
+        raise
 if __name__ == "__main__":
 
-    print(list_get_total_customers(1))
-    print(list_get_total_customers(2))
+    print(customer_report(1))
+    print(customer_report(2))
     # # ------------------------
     # # 1️⃣ Создаём клиентов
     # # ------------------------
